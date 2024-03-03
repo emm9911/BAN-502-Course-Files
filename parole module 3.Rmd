@@ -1,0 +1,186 @@
+---
+title: "module 3 assignment 2"
+output: html_document
+date: "2024-01-31"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
+
+```{r}
+library(tidyverse)
+library(tidymodels)
+library(e1071)
+library(ROCR)
+```
+```{r}
+install.packages("e1071")
+```
+```{r}
+install.packages("ROCR")
+```
+
+```{r}
+parole = read_csv("/Users/emilymann/Downloads/parole.csv")
+parole
+```
+```{r}
+parole = parole %>%
+  mutate(male = as_factor(male),
+         race = as_factor(race),
+         state = as_factor(state),
+         crime = as_factor(crime),
+         multiple.offenses = as_factor(multiple.offenses),
+         violator = as_factor(violator)) %>%
+  mutate(male = fct_recode(male, "male" = "1", "female" = "0"),
+         race = fct_recode(race, "white" = "1", "non-white" = "2"),
+         state = fct_recode(state, "other" = "1", "kentucky" = "2", "louisiana" = "3", "virginia" = "4"),
+         crime = fct_recode(crime, "larceny" = "2", "drug-related" = "3", "driving-related" = "4", "other" = "1"),
+         multiple.offenses = fct_recode(multiple.offenses, "multiple" = "1", "singular" = "0"),
+         violator = fct_recode(violator, "violated" = "1", "no violation" = "0"))
+```
+
+```{r}
+set.seed(12345)
+
+parole_split = initial_split(parole, prop = 0.70, strata = violator)
+
+train = training(parole_split)
+test = testing(parole_split)
+```
+
+
+```{r}
+levels(train$violator)
+```
+
+```{r}
+train = train %>% mutate(violator = fct_relevel(violator, c("No","Yes")))
+levels(train$violator)
+```
+```{r}
+ggplot(parole, aes(x=male, fill = violator)) + geom_bar() + theme_bw()
+```
+```{r}
+ggplot(parole, aes(x=state, fill = violator)) + geom_bar() + theme_bw()
+```
+```{r}
+ggplot(parole, aes(x="max_sentence", fill = violator)) + geom_bar() + theme_bw()
+```
+
+```{r}
+parole_recipe = recipe(violator ~ state, train)
+
+parole_model = 
+  logistic_reg() %>%
+  set_engine("glm")
+
+logref_wf = workflow() %>%
+  add_recipe(parole_recipe) %>%
+  add_model(parole_model)
+
+parole_fit = fit(logref_wf, train)
+```
+
+```{r}
+summary(parole_fit$fit$fit$fit)
+```
+ step_dummy(all_nominal(), -all_outcomes())
+
+```{r}
+parole_recipe2 = recipe(violator ~ state + multiple.offenses + race, train) %>%
+  step_dummy(all_nominal(), -all_outcomes())
+
+parole_model2 = 
+  logistic_reg() %>%
+  set_engine("glm")
+
+logref_wf2 = workflow() %>%
+  add_recipe(parole_recipe2) %>%
+  add_model(parole_model2)
+
+parole_fit2 = fit(logref_wf2, train)
+```
+
+```{r}
+summary(parole_fit2$fit$fit$fit)
+```
+```{r}
+parolee1 = data.frame(state = "louisiana", multiple.offenses = "multiple", race = "white")
+
+pred1= predict(parole_fit2, parolee1, type="prob")
+
+pred1
+```
+```{r}
+predictions = predict(parole_fit2, train, type="prob") [2]
+head(predictions)
+```
+```{r}
+ROCRpred = prediction(predictions, train$violator)
+
+ROCRperf = performance(ROCRpred, "tpr", "fpr")
+plot(ROCRperf, colorize=TRUE, print.cutoffs.at=seq(0,1,by=0.1), text.adj=c(-0.2,1.7))
+```
+```{r}
+as.numeric(performance(ROCRpred, "auc")@y.values)
+```
+```{r}
+opt.cut = function(perf, pred){
+  cut.ind = mapply(FUN=function(x, y, p){
+    d = (x - 0)^2 + (y - 1)^2
+    ind = which(d == min(d))
+    c(sensitivity = y[[ind]], specificity = 1-x[[ind]],
+      cutoff = p[[ind]])
+  }, perf@x.values, perf@y.values, pred@cutoffs)
+}
+print(opt.cut(ROCRperf, ROCRpred))
+```
+```{r}
+t1 = table(train$violator, predictions > 0.2015788)
+t1
+```
+```{r}
+acc = (t1[1,1]+t1[2,2])/nrow(train)
+sen = t1[2,2] / (t1[2,2] + t1[2,1])
+spc = t1[1,1] / (t1[1,1] + t1[1,2])
+```
+
+```{r}
+t1 = table(train$violator, predictions > 0.5)
+(t1[1,1]+t1[2,2]) / nrow(train)
+t1
+```
+
+```{r}
+t2 = table(train$violator, predictions > 0.6)
+(t2[1,1]+t2[2,2]) / nrow(train)
+t2
+```
+
+```{r}
+t3 = table(train$violator, predictions > 1)
+(t3[1]) / nrow(train)
+t3
+```
